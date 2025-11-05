@@ -23,6 +23,10 @@ Variabel ‘dx’ dan ‘dy’ menyimpan nilai lompatan setiap langkah titik ver
 Perhitungan titik koordinat garis dilakukan dengan iterasi sebanyak jumlah langkah, di setiap iterasi dilakukan penjumlahan titik x dan y dengan nilai lompatan titik x dan titik y. Hasil perhitungan setiap iterasi disimpan kedalam variabel ‘kx’ untuk nilai vertikal, dan ‘ky’ untuk nilai horizontal, nilai dibulatkan dengan menggunakan fungsi round().
 Dibuat variabel ‘koor’ untuk menyimpan gabungan nilai variabel ‘kx’ dan ‘ky’ dengan menggunakan fungsi set() dan zip().
 
-## 5. Tabel aperbandingan raster dan vektor
+## 5. Mencetak Titik
+<img width="960" height="690" alt="titik" src="https://github.com/user-attachments/assets/73ab6cb2-3ed3-45dd-afd8-10cfee3e966b" />
+
+
+## 6. Tabel aperbandingan raster dan vektor
 <img width="1311" height="741" alt="tabel" src="https://github.com/user-attachments/assets/a916217e-b6df-4fe9-8b6f-ae7cc0bad614" />
 
