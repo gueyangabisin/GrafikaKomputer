@@ -18,3 +18,9 @@ Simetri 8-Oktan: Kita hanya perlu menghitung koordinat untuk seperdelapan lingka
 Digunakan untuk: Menggerakkan matahari secara interaktif.
 Transformasi 2 dimensi ini memungkinkan objek untuk berpindah posisi dari koordinat lama ke koordinat baru di dalam canvas.
 Prinsip Kerja: Translasi dilakukan dengan menambahkan nilai pergeseran (tx untuk horizontal dan ty untuk vertikal) pada titik pusat objek. Dalam proyek ini, nilai tx dan ty dipicu oleh input keyboard. Setiap kali posisi berubah, sistem akan menghitung ulang seluruh piksel menggunakan algoritma DDA dan Mid Point agar matahari terlihat berpindah tempat secara real-time.
+
+## 4. cara menjalankan program
+1. unduh file draw_engine.py dan main.py, simpan menjadi satu folder
+2. buka kedua file menggunakan IDE phyton
+3. jalankan file main.py
+4. menggerakkan matahari dengan tombol row atas, bawah, kanan, kiri.
