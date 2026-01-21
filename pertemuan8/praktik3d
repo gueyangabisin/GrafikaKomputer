@@ -1,0 +1,260 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+# ==========================================
+# 1. MATRIKS TRANSFORMASI
+# ==========================================
+def get_translation(tx, ty, tz):
+    return np.array([[1,0,0,tx], [0,1,0,ty], [0,0,1,tz], [0,0,0,1]])
+
+def get_rotation_z(angle_deg): 
+    rad = np.radians(angle_deg)
+    c, s = np.cos(rad), np.sin(rad)
+    return np.array([[c,-s,0,0], [s,c,0,0], [0,0,1,0], [0,0,0,1]])
+
+def get_rotation_y(angle_deg):
+    rad = np.radians(angle_deg)
+    c, s = np.cos(rad), np.sin(rad)
+    return np.array([[c,0,s,0], [0,1,0,0], [-s,0,c,0], [0,0,0,1]])
+
+def get_rotation_x(angle_deg): 
+    rad = np.radians(angle_deg)
+    c, s = np.cos(rad), np.sin(rad)
+    return np.array([[1,0,0,0], [0,c,-s,0], [0,s,c,0], [0,0,0,1]])
+
+# ==========================================
+# 2. GEOMETRY GENERATOR
+# ==========================================
+def create_cuboid(length, width, height, center_offset=(0,0,0)):
+    cx, cy, cz = center_offset
+    dx, dy, dz = length, width/2, height/2
+    points = np.array([
+        [cx, -dy, -dz, 1], [cx+dx, -dy, -dz, 1], [cx+dx, dy, -dz, 1], [cx, dy, -dz, 1], 
+        [cx, -dy, dz, 1],  [cx+dx, -dy, dz, 1],  [cx+dx, dy, dz, 1],  [cx, dy, dz, 1]   
+    ])
+    return points.T
+
+def points_to_faces(points):
+    p = points[:3, :]
+    idx = [
+        [0,1,2,3], [4,5,6,7], [0,1,5,4], 
+        [2,3,7,6], [1,2,6,5], [4,7,3,0]
+    ]
+    return [[list(p[:, i]) for i in f] for f in idx]
+
+def get_shadow_poly(points):
+    shadow_pts = points.copy()
+    shadow_pts[2, :] = 0.02 
+    return points_to_faces(shadow_pts)
+
+# ==========================================
+# 3. SETUP SCENE
+# ==========================================
+fig = plt.figure(figsize=(10, 8), facecolor='#2b2b2b') 
+ax = fig.add_subplot(111, projection='3d')
+ax.set_axis_off()
+ax.set_facecolor('#2b2b2b') 
+
+ax.view_init(elev=25, azim=45)
+ax.set_xlim([-12, 12]); ax.set_ylim([-12, 12]); ax.set_zlim([0, 14])
+
+# Lantai Grid (dipindah ke paling bawah dengan Z negatif)
+xx, yy = np.meshgrid(range(-12, 13, 2), range(-12, 13, 2))
+zz = np.zeros_like(xx) - 0.1  # Lantai di bawah semua objek
+ax.plot_surface(xx, yy, zz, color='#444444', alpha=0.3, shade=False)
+for i in range(-12, 13, 2):
+    ax.plot([i, i], [-12, 12], [-0.1, -0.1], color='gray', linewidth=0.5, alpha=0.3)
+    ax.plot([-12, 12], [i, i], [-0.1, -0.1], color='gray', linewidth=0.5, alpha=0.3)
+
+# ==========================================
+# 4. INISIALISASI ROBOT & OBJEK
+# ==========================================
+
+BASE_H = 1.5
+L1 = 8.0
+L2 = 6.0
+
+# 1. PONDASI (BASE)
+base_width = 4
+base_geo = create_cuboid(base_width, base_width, BASE_H, center_offset=(-base_width/2, 0, BASE_H/2)) 
+base_plot = Poly3DCollection(points_to_faces(base_geo), facecolors='#7f8c8d', edgecolors='gray')
+ax.add_collection3d(base_plot)
+
+# 2. LENGAN 1 (BAHU)
+arm1_geo = create_cuboid(L1, 1.2, 1.2, center_offset=(0, 0, 0))
+arm1_plot = Poly3DCollection([], facecolors='#d35400', edgecolors='black', linewidths=0.5)
+arm1_shadow = Poly3DCollection([], facecolors='black', alpha=0.2)
+ax.add_collection3d(arm1_plot); ax.add_collection3d(arm1_shadow)
+
+# 3. LENGAN 2 (SIKU)
+arm2_geo = create_cuboid(L2, 1.0, 1.0, center_offset=(0, 0, 0))
+arm2_plot = Poly3DCollection([], facecolors='#e67e22', edgecolors='black', linewidths=0.5)
+arm2_shadow = Poly3DCollection([], facecolors='black', alpha=0.2)
+ax.add_collection3d(arm2_plot); ax.add_collection3d(arm2_shadow)
+
+# 4. GRIPPER
+grip_geo = create_cuboid(1.5, 0.5, 0.5, center_offset=(0, 0, 0)) 
+grip_plot = Poly3DCollection([], facecolors='#2c3e50', edgecolors='black')
+ax.add_collection3d(grip_plot)
+
+# --- CLASS BLOK ---
+class Block:
+    def __init__(self, start, target, color):
+        self.geo = create_cuboid(2, 2, 2, center_offset=(-1, 0, 0)) 
+        self.start_pos = start
+        self.target_pos = target
+        self.color = color
+        self.state = "WAITING" 
+        self.curr_M = get_translation(*start)
+        self.chaos_M = np.eye(4)
+        
+        self.plot = Poly3DCollection([], facecolors=color, edgecolors='white', linewidths=0.5)
+        self.shadow = Poly3DCollection([], facecolors='black', alpha=0.3)
+        ax.add_collection3d(self.plot); ax.add_collection3d(self.shadow)
+
+# Posisi Blok
+blocks = [
+    Block((-7, -4, 1), (6, 0, 1), '#c0392b'),
+    Block((-7, -8, 1), (6, 0, 3), '#f1c40f'),
+    Block((-4, -6, 1), (6, 0, 5), '#2980b9')
+]
+
+current_idx = 0; timer = 0; phase_idx = 0
+PHASES = ["PICKUP", "MOVE", "PLACE", "DESTROY", "RESET"]
+
+# ==========================================
+# 5. LOOP ANIMASI (BENTUK HURUF N)
+# ==========================================
+def update(frame):
+    global current_idx, timer, phase_idx
+    
+    current_phase = PHASES[phase_idx]
+    s_z, s_y, e_y = 0, 0, 0
+    
+    # --- LOGIKA TRAJEKTORI "N" TERBALIK (MENGAMBIL DARI ATAS) ---
+    # Konsep: Lengan naik ke atas lalu turun menggapai dari atas
+    # - Bahu (s_y) NEGATIF untuk mengangkat lengan ke atas
+    # - Siku (e_y) POSITIF untuk melipat ke atas
+    
+    if current_phase == "PICKUP":
+        prog = timer / 40.0
+        
+        # Rotasi Badan (Z) ke arah target
+        s_z = 0 + (135 - 0) * prog 
+        
+        # BAHU: Angkat ke atas (negatif = naik)
+        # 0 -> -70 (naik tinggi) -> -45 (turun sedikit untuk pickup)
+        if prog < 0.5:
+            s_y = -70 * (prog * 2)  # Naik ke atas
+        else:
+            s_y = -70 + 25 * ((prog - 0.5) * 2)  # Turun sedikit
+        
+        # SIKU: Lipat ke atas (positif = lipat naik)
+        # 0 -> 40 -> 70 (lipat makin tajam untuk menjangkau dari atas)
+        if prog < 0.5:
+            e_y = 40 * (prog * 2)  # Mulai lipat
+        else:
+            e_y = 40 + 30 * ((prog - 0.5) * 2)  # Lipat lebih tajam
+        
+        if timer >= 40:
+            phase_idx = 1; timer = 0; blocks[current_idx].state = "HELD"
+
+    elif current_phase == "MOVE":
+        prog = timer / 50.0
+        
+        # Badan balik ke tengah
+        s_z = 135 - (135 - 0) * prog 
+        
+        # Bahu: Tetap terangkat (negatif = atas)
+        s_y = -45 - 15 * np.sin(prog * np.pi)  # Tetap di atas saat bergerak
+        
+        # Siku: Tetap terlipat ke atas
+        e_y = 70 - 10 * np.sin(prog * np.pi)  # Jaga barang tetap aman
+        
+        if timer >= 50:
+            phase_idx = 2; timer = 0
+            # Snap position
+            blocks[current_idx].curr_M = get_translation(*blocks[current_idx].target_pos)
+            blocks[current_idx].state = "PLACED"
+
+    elif current_phase == "PLACE":
+        # Retract (Tarik kembali lengan)
+        prog = timer / 20.0
+        s_y = -45 + (45 * prog)  # Turunkan bahu kembali ke 0
+        e_y = 70 - (70 * prog)   # Luruskan siku kembali ke 0
+        
+        if timer >= 20:
+            timer = 0; current_idx += 1
+            if current_idx >= len(blocks): phase_idx = 3 
+            else: phase_idx = 0 
+
+    elif current_phase == "DESTROY":
+        s_z = -30; s_y = 30; e_y = -30
+        if timer == 0:
+            for b in blocks:
+                b.state = "CHAOS"
+                rand_t = get_translation(np.random.uniform(-8, 8), np.random.uniform(-8, 8), np.random.uniform(0, 5))
+                rand_r = get_rotation_x(np.random.uniform(0,360)) @ get_rotation_z(np.random.uniform(0,360))
+                b.chaos_M = rand_t @ rand_r
+        if timer >= 60:
+            phase_idx = 4; timer = 0
+            
+    elif current_phase == "RESET":
+        current_idx = 0; phase_idx = 0; timer = 0
+        for b in blocks:
+            b.state = "WAITING"
+            b.curr_M = get_translation(*b.start_pos)
+
+    timer += 1
+    
+    # --- UPDATE MATRIKS (KUNCI PERBAIKAN) ---
+    
+    # 1. PONDASI & PANGKAL LENGAN
+    # Geser pangkal lengan setinggi pondasi (Z = BASE_H)
+    # Ini membuat lengan 'duduk' di atas kotak, bukan di dalamnya.
+    T_base_height = get_translation(0, 0, BASE_H) 
+    
+    # 2. Rotasi Bahu
+    R_shoulder = get_rotation_z(s_z) @ get_rotation_y(s_y)
+    
+    # 3. Matriks Lengan 1
+    M1 = T_base_height @ R_shoulder 
+    
+    # 4. Matriks Lengan 2
+    M2 = M1 @ get_translation(L1, 0, 0) @ get_rotation_y(e_y)
+    
+    # 5. Matriks Gripper
+    M_grip = M2 @ get_translation(L2, 0, 0) 
+
+    # --- RENDER ---
+    
+    pts1 = M1 @ arm1_geo
+    arm1_plot.set_verts(points_to_faces(pts1))
+    arm1_shadow.set_verts(get_shadow_poly(pts1))
+
+    pts2 = M2 @ arm2_geo
+    arm2_plot.set_verts(points_to_faces(pts2))
+    arm2_shadow.set_verts(get_shadow_poly(pts2))
+    
+    pts_grip = M_grip @ grip_geo
+    grip_plot.set_verts(points_to_faces(pts_grip))
+
+    for b in blocks:
+        if b.state == "HELD":
+            # Blok dipegang dari atas, orientasi vertikal
+            # Putar 90° di Y agar blok berdiri lurus
+            b.curr_M = M_grip @ get_rotation_y(90) @ get_translation(1.0, 0, 0)
+
+        elif b.state == "CHAOS":
+            if timer < 30: b.curr_M = b.chaos_M @ b.curr_M 
+        
+        pts_b = b.curr_M @ b.geo
+        b.plot.set_verts(points_to_faces(pts_b))
+        b.shadow.set_verts(get_shadow_poly(pts_b))
+
+    return arm1_plot, arm2_plot, grip_plot
+
+ani = animation.FuncAnimation(fig, update, frames=1000, interval=25, blit=False)
+plt.show()
